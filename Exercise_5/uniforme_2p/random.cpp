@@ -1,0 +1,194 @@
+/****************************************************************
+*****************************************************************
+    _/    _/  _/_/_/  _/       Numerical Simulation Laboratory
+   _/_/  _/ _/       _/       Physics Department
+  _/  _/_/    _/    _/       Universita' degli Studi di Milano
+ _/    _/       _/ _/       Prof. D.E. Galli
+_/    _/  _/_/_/  _/_/_/_/ email: Davide.Galli@unimi.it
+*****************************************************************
+*****************************************************************/
+
+#include <iostream>
+#include <fstream>
+#include <cmath>
+#include <cstdlib>
+#include "random.h"
+#include <string>
+
+
+using namespace std;
+
+Random :: Random(){}
+// Default constructor, does not perform any action
+
+Random :: ~Random(){}
+// Default destructor, does not perform any action
+
+void Random :: SaveSeed(){
+   // This function saves the current state of the random number generator to a file "seed.out"; questo serve per continuare il calcolo dalla sequenza precedente, bisogna però leggere gli stessi primes precedenti)
+   ofstream WriteSeed;
+   WriteSeed.open("seed.out");
+   if (WriteSeed.is_open()){
+      WriteSeed << "RANDOMSEED	" << l1 << " " << l2 << " " << l3 << " " << l4 << endl;;
+   } else cerr << "PROBLEM: Unable to open random.out" << endl;
+  WriteSeed.close();
+  return;
+}
+
+double Random :: Gauss(double mean, double sigma) {
+   // This function generates a random number from a Gaussian distribution with given mean and sigma
+   double s=Rannyu();
+   double t=Rannyu();
+   double x=sqrt(-2.*log(1.-s))*cos(2.*M_PI*t);
+   return mean + x * sigma;
+}
+//scrivo un metodo che mi generi un numero casuale tra [0,1] distribuito come d(x)=2(x-1)
+//questa distribuzione la uso per fare importance sampling nel secondo punto del primo esercizio del notebook 2
+//chiamo taylor perchè è lo sviluppo di taylor di pi/2 cos(xpi/2) centrato in x=1 e arrestato al primo ordine
+
+double Random :: taylor(void) {
+   
+   double s=Rannyu();
+   
+   double x=1-sqrt(1-s);
+   return  x ;
+}
+
+
+
+
+double Random :: Rannyu(double min, double max){
+   // This function generates a random number in the range [min, max)
+   return min+(max-min)*Rannyu();
+}
+
+double Random :: Rannyu(void){
+  // This function generates a random number in the range [0,1)
+  const double twom12=0.000244140625;
+  int i1,i2,i3,i4;
+  double r;
+
+  i1 = l1*m4 + l2*m3 + l3*m2 + l4*m1 + n1;
+  i2 = l2*m4 + l3*m3 + l4*m2 + n2;
+  i3 = l3*m4 + l4*m3 + n3;
+  i4 = l4*m4 + n4;
+  l4 = i4%4096;
+  i3 = i3 + i4/4096;
+  l3 = i3%4096;
+  i2 = i2 + i3/4096;
+  l2 = i2%4096;
+  l1 = (i1 + i2/4096)%4096;
+  r=twom12*(l1+twom12*(l2+twom12*(l3+twom12*(l4))));
+
+  return r;
+}
+
+void Random :: SetRandom(int * s, int p1, int p2){
+  // This function sets the seed and parameters of the random number generator
+  m1 = 502;
+  m2 = 1521;
+  m3 = 4071;
+  m4 = 2107;
+  l1 = s[0];
+  l2 = s[1];
+  l3 = s[2];
+  l4 = s[3];
+  n1 = 0;
+  n2 = 0;
+  n3 = p1;
+  n4 = p2;
+
+  return;
+}
+
+/* metodo set_up_generatore
+se passo solo rnd , vengono passati di default Primes e seed.in
+
+i default non impediscono di passare manualmente altri file con altri primes e/o altri semi, i defualt vengono inseriti nell'header
+*/
+void Random:: setup_random_generator(Random& rnd, const string& primes_file, const string& seed_file ) {
+    int seed[4];
+    int p1, p2;
+
+    ifstream Primes(primes_file);
+    if (Primes.is_open()) {
+        Primes >> p1 >> p2;
+        Primes.close();
+    } else {
+        cerr << "PROBLEM: Unable to open " << primes_file << endl;
+        return;
+    }
+
+    ifstream input(seed_file);
+    string property;
+    if (input.is_open()) {
+        while (!input.eof()) {
+            input >> property;
+            if (property == "RANDOMSEED") {
+                input >> seed[0] >> seed[1] >> seed[2] >> seed[3];
+                rnd.SetRandom(seed, p1, p2);
+            }
+        }
+        input.close();
+    } else {
+        cerr << "PROBLEM: Unable to open " << seed_file << endl;
+        return;
+    }
+}
+
+
+
+//funzione che calcola S(T) prezzo suk mercato finanziario che segue un geometric brownian motion
+double Random :: GBM_diretto(double S_0, double mu, double sigma, double T_fin){
+   double s;
+   
+
+   s= S_0* exp( (mu- pow(sigma,2) * 0.5) * (T_fin) + sigma * Gauss(0,T_fin) ) ;
+
+   return s;
+
+} 
+//funzione che calcola il passo i+1 dato inj input il passo i  di un geometric brownian motion
+
+double Random :: GBM_indiretto(double S_0, double mu, double sigma, double T_fin, double T_in){
+
+   double s;
+   
+   s= S_0*exp( (mu-pow(sigma,2)/2) * (T_fin- T_in) + sigma * Gauss(0,1)*sqrt(T_fin-T_in) ) ;
+
+   return s;
+   
+
+   
+
+}
+
+// metodo ricorsiva per calcolare S(t) con il moto geometrico browniano
+/*
+accetta in input 
+*/
+double Random :: GBM_ricorsivo(double S_t, double mu, double sigma, double dt, int steps) {
+    if (steps == 0)  // Caso base: nessun altro passo da calcolare
+        return S_t;
+    
+    // Genera un numero casuale Z ~ N(0,1)
+    double Z = Gauss(0,1);
+    
+    // Calcola il valore successivo di S(t)
+    double S_next = S_t * exp((mu - 0.5 * sigma * sigma) * dt + sigma * Z * sqrt(dt));
+
+    // Chiamata ricorsiva per il passo successivo
+    return GBM_ricorsivo(S_next, mu, sigma, dt, steps - 1);
+}
+
+
+
+/****************************************************************
+*****************************************************************
+    _/    _/  _/_/_/  _/       Numerical Simulation Laboratory
+   _/_/  _/ _/       _/       Physics Department
+  _/  _/_/    _/    _/       Universita' degli Studi di Milano
+ _/    _/       _/ _/       Prof. D.E. Galli
+_/    _/  _/_/_/  _/_/_/_/ email: Davide.Galli@unimi.it
+*****************************************************************
+*****************************************************************/
