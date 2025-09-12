@@ -1,0 +1,9 @@
+SIMULATION_TYPE        4
+NPART                  1
+DELTA                  2.3
+X0                     0.9
+MU                     0.8
+SIGMA                  0.6
+NBLOCKS                100
+NSTEPS                 1000
+ENDINPUT

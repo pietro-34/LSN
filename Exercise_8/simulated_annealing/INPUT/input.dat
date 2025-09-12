@@ -1,0 +1,14 @@
+SIMULATION_TYPE        4
+TEMP                   0.1
+NPART                  1
+DELTA                  2.3
+X0                     0.0
+MU                     1.0
+SIGMA                  0.7
+NBLOCKS                100
+NSTEPS                 1000
+INVERSE_DT             0.0005
+DELTA_MU               0.01
+DELTA_SIGMA            0.01
+SA_STEPS               50
+ENDINPUT

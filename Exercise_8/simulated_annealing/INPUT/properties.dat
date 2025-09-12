@@ -1,0 +1,35 @@
+LOCAL_ENERGY
+ENDPROPERTIES
+
+/////////////////////////////////////
+
+Possible properties:
+
+LJ Molecular Dynamics or Monte Carlo:
+
+TOTAL_ENERGY
+POTENTIAL_ENERGY
+KINETIC_ENERGY
+TEMPERATURE
+PRESSURE
+GOFR              100
+
+Only LJ Molecular Dynamics:
+
+POFV              30
+
+Ising 1D MRT^2 or Gibbs:
+
+TOTAL_ENERGY
+MAGNETIZATION
+ISTANT_MAGNETIZATION
+SPECIFIC_HEAT
+SUSCEPTIBILITY
+//sim_type=4 contiene sia VMC che simulated annealing
+Only VMC
+
+LOCAL_ENERGY
+
+Only simulated annealing
+
+LOCAL_ENERGY
