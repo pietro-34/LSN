@@ -1,0 +1,13 @@
+LOSS_GENERATION
+AVERAGED_LOSS
+PATH
+ENDPROPERTIES
+
+/////////////////////////////////////
+
+Possible properties:
+
+LOSS_GENERATION
+AVERAGED_LOSS
+PATH --> stampa il miglior path quello associato alla variabile _best_chromo
+

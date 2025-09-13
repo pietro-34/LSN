@@ -1,0 +1,665 @@
+/****************************************************************
+*****************************************************************
+    _/    _/  _/_/_/  _/       Numerical Simulation Laboratory
+   _/_/  _/ _/       _/       Physics Department
+  _/  _/_/    _/    _/       Universita' degli Studi di Milano
+ _/    _/       _/ _/       Prof. D.E. Galli
+_/    _/  _/_/_/  _/_/_/_/ email: Davide.Galli@unimi.it
+*****************************************************************
+*****************************************************************/
+#include <mpi.h>
+#include <cmath>
+#include <cstdlib>
+#include <string>
+#include "system.h"
+
+using namespace std;
+using namespace arma;
+
+
+void System :: initialize(int rank){ // Initialize the System object according to the content of the input files in the ../INPUT/ directory
+
+
+  //questa parte rimane uguale- LETTURA PRIMES
+  int p1, p2; // Read from ../INPUT/Primes a pair of numbers to be used to initialize the RNG
+  ifstream Primes("../INPUT/Primes");
+
+  for (int i = 0; i <= rank; ++i){
+    
+           Primes >> p1 >> p2 ;
+  }
+
+  Primes.close();
+  int seed[4]; // Read the seed of the RNG
+  ifstream Seed("../INPUT/seed.in");
+  Seed >> seed[0] >> seed[1] >> seed[2] >> seed[3];
+  _rnd.SetRandom(seed,p1,p2);
+
+  //setto il genratore di shuffle() diversamente per ogni rank:
+  arma_rng::set_seed(rank*10+77);
+
+  
+  ifstream input("../INPUT/input.dat"); // Start reading ../INPUT/input.dat
+  ofstream coutf;
+  coutf.open("../OUTPUT/output.dat");
+  string property;                      
+  double delta;
+  while ( !input.eof() ){
+    input >> property;
+    if( property == "N_CITY" ){
+      input >> _n_city;
+      coutf << "N CITY= " << _n_city << endl;    
+
+    } else if( property == "POPULATION" ){
+      input >> _population;
+      coutf << "POPULATION= " << _population << endl;
+      _chromo.set_size(_population);
+      _chromo_son.set_size(_population);
+    } else if( property == "SPAZIAL_CONFIGURATION" ){
+      input >> _spatial_config;
+      
+      coutf << "SPAZIAL CONFIGURATION= " << _spatial_config << endl;
+    } else if( property == "N_GENERATION" ){
+      input >> _ngen;
+      coutf << "NUMBER OF GENERATION= " << _ngen << endl;
+    } else if( property == "ENDINPUT" ){
+      coutf << "Reading input completed!" << endl;
+      break;
+    } else cerr << "PROBLEM: unknown input" << endl;
+  }
+  
+  //chiudo l'input e creo le città; metodo city() che prende in argomento un bool ; se 0--> circumference se 1--> square
+  
+  input.close();
+  //genero le città secondo la configuarazione spaziale 
+  if(_spatial_config == "PROV_ITA"){
+
+    this->read_city();
+  }else{
+
+    bool C;
+    if (_spatial_config=="CIRCUMFERENCE"){ C=false;}
+      else{C=true;}
+    this->generate_city(C); // read_city diventa generate_city
+  
+  }
+
+
+  this->compute_distance2();// calcola distanze al quadrato tra le città e le assegna alla matrice
+  this->population(rank); //genera la popolazione
+  coutf << "Population generated!" << endl;
+  coutf.close();
+  return;
+}
+
+void System :: initialize_properties(int rank){
+
+  ifstream input("../INPUT/properties.dat");
+    ofstream coutf;
+    coutf.open("../OUTPUT/output.dat", ios::app);
+    string property;                      
+    double delta;
+    while ( !input.eof() ){
+      input >> property;
+      
+      if( property == "LOSS_GENERATION" ){
+
+        ofstream coutl("../OUTPUT/loss_gen"+to_string(rank)+".dat");
+        coutl.close();
+        
+      } else if( property == "AVERAGED_LOSS" ){
+
+        ofstream coutm("../OUTPUT/mean_loss"+to_string(rank)+".dat");
+        coutm.close();
+       
+      }  else if( property == "PATH" ){
+
+        ofstream coutpath("../OUTPUT/path"+to_string(rank)+".dat");
+        coutpath.close();
+       
+      } else if( property == "ENDPROPERTIES" ){
+        coutf << "Reading input properties completed!" << endl;
+        break;
+      } else cerr << "PROBLEM: unknown input properties" << endl;
+    }
+  coutf.close();
+  return;
+}
+
+//genera le coordinate della città e le assegna alla matrice city; stampa su file con .save()
+void System :: generate_city(bool C){
+
+    city.set_size(_n_city,2); //matrice  _n_city x 2=  34 x 2 le colonne corrispondono alle coordinate delle città; colonna zero x, colonna 1 y
+
+  if(C==false){    //genero le città su di una circonferenza di raggio 10
+
+                  double r=10.0;
+                  double theta,x,y;
+                  for(int i=0; i<city.n_rows; i++){
+                        theta= _rnd.Rannyu(0, 2*M_PI);
+                        x=r*cos(theta);
+                        y=r*sin(theta);
+                        
+                        city(i,0)=x;
+                        city(i,1)=y;}
+                      
+    
+          }else{            double x,y;  //genero le città all'interno di un quadrato di lato L=10
+                            for(int i=0; i<city.n_rows; i++){
+                                  
+                                  x=_rnd.Rannyu(0, 10);
+                                  y=_rnd.Rannyu(0, 10);
+                                  
+                                  city(i,0)=x;
+                                  city(i,1)=y;}
+  }
+
+          //salvo su file con il metodo .save()
+          
+          //city.save("../OUTPUT/coordinate_città.csv",  csv_ascii);
+
+  return;
+}
+
+//calcola distanze al quadrato e le assegna alla mat distance2
+void System :: compute_distance2(){
+
+    distance2.set_size(_n_city,_n_city);
+    distance2.zeros();
+     
+    double dx,dy, d;
+
+    for(int i=0; i<_n_city;i++){
+      for(int j=0;j<_n_city;j++){
+        
+                      dy=city(i,1)-city(j,1);
+                      dx=city(i,0)-city(j,0);
+                      d= dx*dx + dy*dy;
+                      distance2(i,j)=d;
+                      }
+                  }
+      //distance2.save("../OUTPUT/distance2.csv",  csv_ascii);
+  return;
+}
+
+void System :: population(int rank){    //generate the population, initialize the chromo_son field and the best_chromo
+
+  
+
+  ofstream coutp;
+  coutp.open("../OUTPUT/population"+ to_string(rank) +".dat");
+      //initialize best chromo
+      _best_chromo.initialize(_n_city);
+
+    for (int i=0; i<_population; i++){
+      //initialize chromo
+      _chromo(i).initialize(_n_city);
+      _chromo(i).mix();
+      _chromo(i).check();
+
+      //initialize  chromo son 
+      _chromo_son(i).initialize(_n_city);
+      _chromo_son(i).check();
+      
+      for (int k=0; k<_n_city; k++){
+
+            coutp << _chromo(i).get_gene(k)<<"\t";
+      }
+      coutp<<endl;
+    }
+  coutp.close();
+  //initialize chromo_elite
+  _chromo_elite.set_size(elite);
+  for(int i=0; i<elite; i++){
+    _chromo_elite(i).initialize(_n_city);
+  }
+  
+
+  //initialize the best chromo
+
+    return;
+}
+
+void System :: print_population(string filename ){
+
+  ofstream coutps;
+  coutps.open("../OUTPUT/" + filename);
+
+  for (int i=0; i<_population; i++){
+                for (int k=0; k<_n_city; k++){
+
+            coutps << _chromo(i).get_gene(k)<<"\t";
+      }
+      coutps<<" loss "<< _chromo(i).get_loss() <<endl;
+    }
+  coutps.close();
+    
+
+  return;
+}
+
+void System :: print_new_gen(string filename ){
+
+  ofstream coutng;
+  coutng.open("../OUTPUT/" + filename);
+
+  for (int i=0; i<_population; i++){
+                for (int k=0; k<_n_city; k++){
+
+            coutng << _chromo_son(i).get_gene(k)<<"\t";
+      }
+      coutng<<" loss "<< _chromo_son(i).get_loss() <<endl;
+    }
+  coutng.close();
+    
+
+  return;
+}
+
+void System :: compute_loss(){
+
+    for(int i=0; i<_population; i++){
+
+        _chromo(i).set_loss(distance2);
+            
+      }
+
+    return;
+}
+//metodo per il data field _chromosome
+void System::sort_population() {
+    // bubble sort su _population elementi
+    for(int pass = 0; pass < _population - 1; ++pass) {
+        // dopo pass iterazioni, gli ultimi pass elementi sono già al loro posto
+        for(int j = 0; j < _population - pass - 1; ++j) {
+            // se il cromosoma j+1 ha loss minore di j, scambiali
+            if (_chromo(j+1) < _chromo(j)) {
+                swap(_chromo(j), _chromo(j+1));
+            }
+        }
+    }
+}
+//metodo per un field generico
+void System :: sort_chromo_field(field <Chromosome> exchange){
+
+  int n_elem = exchange.n_elem;
+            // bubble sort su _population elementi
+                for(int pass = 0; pass < n_elem - 1; ++pass) {
+                    // dopo pass iterazioni, gli ultimi pass elementi sono già al loro posto
+                    for(int j = 0; j < n_elem - pass - 1; ++j) {
+                        // se il cromosoma j+1 ha loss minore di j, scambiali
+                        if (exchange(j+1) < exchange(j)) {
+                            swap(exchange(j), exchange(j+1));
+                        }
+                    }
+                }
+
+
+}
+
+//implemento j=int(M * r^p)+1 ; il +1 non selezionerebbe mai il _chromo(0) quindi non lo aggiungo
+//ritona la coppia di indici 
+ivec System :: selection(){
+  
+  ivec index(2);
+  
+   index(0)=int(_population * pow(_rnd.Rannyu(),3));
+   index(1)=int(_population * pow(_rnd.Rannyu(),3));
+   return index;
+}
+
+void System ::  mutation(){
+  int index1, index2;
+  //int mutation=0;
+  for(int i=0; i< _population ; i++){
+
+    if(_rnd.Rannyu() < p_m_swap){ //permutazione di due geni
+
+        //mutation++;
+        index1= int(_rnd.Rannyu()*(_n_city-1))+1; //in questo modo non può essere zero, quindi non permuto il primo gene(rispetto il bound)
+        index2= int(_rnd.Rannyu()*(_n_city-1))+1; 
+
+          //cout<<"cromosoma "<< i <<"  indici di gene "<<index1<<"  "<< index2<<endl; 
+
+        _chromo_son(i).permutation(index1, index2);
+        _chromo_son(i).set_loss(distance2);
+        _chromo_son(i).check();
+
+    }
+    if(_rnd.Rannyu()< p_m_shift){   //shift 
+          int k=(_n_city * _rnd.Rannyu())+1;
+        _chromo_son(i).shift(k);
+        _chromo_son(i).check();
+        _chromo_son(i).set_loss(distance2);
+
+    }
+    if(_rnd.Rannyu()<p_m_exchange){ //scambio di blocco
+
+        int k=int((_n_city/2)*_rnd.Rannyu())+1; //k sempre minore di _n_city/2 K appartiene a [1; _n_city/2) 
+      _chromo_son(i).exchange_block(k);
+      _chromo_son(i).check();
+      _chromo_son(i).set_loss(distance2);
+
+    }
+    if(_rnd.Rannyu()<p_m_block){ //riordinamento di un blocco
+
+        int k=int((_n_city-1)*_rnd.Rannyu())+1; //k sempre minore di _n_city/2 K appartiene a [1; _n_city/2) 
+      _chromo_son(i).block_inversion(k);
+      _chromo_son(i).check();
+      _chromo_son(i).set_loss(distance2);
+
+    }
+  }
+  //cout<< "cromosomi mutati "<< double(mutation)/double(_population)<< endl;
+  
+  _chromo=_chromo_son;
+  //ora verifico che gli elemnti di _chromo_elite siano diversi da quelli di chromo, in caso lo fossero li aggiungo tutti infondo a _chromo
+  //se sono già presenti non li aggiungo
+  for(int i=0; i<elite; i++){
+    for(int j=0; j<_population; j++){
+
+      if(_chromo_elite(i).get_loss()==_chromo(j).get_loss()){continue;}
+      else{_chromo(_population-i-1)=_chromo_elite(i);}
+    
+    }
+  }
+  sort_population();
+
+//salvo il miglior cromosoma nella variabile ausiliaria _best_chromo
+if(_chromo(0) < _best_chromo){
+  
+  _best_chromo=_chromo(0);
+}
+  return;
+}
+
+void System :: crossover(){
+
+  //save the best chromo of the chromo field
+  _best_chromo=_chromo(0); 
+  
+  ivec index(2);
+  double n_c;
+  n_c=_population/2;
+  int coppie_cros=0;
+  //riempo chromo_elite con i 10 migliori _chromo 
+for(int i=0; i<elite ;i++){
+      _chromo_elite(i)=_chromo(i);
+}
+  
+//ciclo sulle coppie
+  for(int i=0; i< n_c ; i++){
+          
+            //seleziono la coppia e assegno gli indici all'ivec index
+            index = selection();
+
+            //se la _rnd < probabilità di fare crossover allora faccio il crossover 
+            if(_rnd.Rannyu()<p_c){
+                
+                //cout<<"coppia "<< i <<" indici " << index(0)<<"\t"<< index(1) <<endl;
+              //ora devo selezionare un indice di gene a caso tra quelli disponibili; e poi fare il cut 
+              //in questo modo non considero mai l'indice 0
+              int k=int( _n_city * _rnd.Rannyu())+1;
+              
+              
+              
+                crossover_2chromo( _chromo(index(0)), _chromo(index(1)),  k);
+                
+                  //i genitori crossoverizzati diventano i figli
+                _chromo_son(i)=_chromo(index(0)); 
+                _chromo_son(n_c+i)=_chromo(index(1));
+                _chromo_son(i).check();   //after crossover check the bounds
+                _chromo_son(n_c+1).check(); //
+                coppie_cros++;
+
+
+              
+              
+              } else{   _chromo_son(i)=_chromo(index(0)); //altrimenti copia genitori in figli
+                        _chromo_son(n_c+i)=_chromo(index(1));
+                      
+                    }
+  }
+    
+
+}
+
+void System :: crossover_2chromo(Chromosome& _chromo1, Chromosome& _chromo2, int k){
+
+            int dimsub= _n_city-k;
+        //se k=0 e k=_n_city -1 madre e padre non cambiano, in realtà non può essere k=0 nella chiamata in crossover() 
+        if (k != (_n_city-1) ){
+            ivec sub_c1(dimsub), sub_c2(dimsub), sub_new1(dimsub), sub_new2(dimsub);
+
+            sub_c1=_chromo1.get_rest_chromo(k); //metodo che ritorna gli ultimi _n_city-k elementi in un vettore ivec
+            sub_c2=_chromo2.get_rest_chromo(k);
+
+            
+            sub_new1=search_sub_in_chromo(sub_c1, _chromo2);
+            sub_new2=search_sub_in_chromo(sub_c2, _chromo1);
+
+            _chromo1.set_rest_chromo(sub_new1, distance2); //sostituisce sub_new1 in chromo1 e RICALCOLA
+            _chromo2.set_rest_chromo(sub_new2, distance2);
+
+            
+            
+        } 
+
+
+}
+ivec System :: search_sub_in_chromo(ivec& sub, Chromosome & _chromo){
+
+        ivec sub_new(sub.size());
+        int j=0;
+
+        //facendolo partire da 1 evitiamo l'inutile ricerca del chromo(0)=1=sub(i)
+        for(int k=1; k < _n_city; k++ ){
+          for(int i=0; i< sub.size(); i++){
+
+                if( _chromo.get_gene(k) == sub(i) ){      
+                                                      sub_new(j)=sub(i);
+                                                      j++;
+                }   
+          }
+
+        }
+
+        return sub_new;
+
+}
+
+void System :: measure(int i,int rank){
+  //best loss
+  ofstream coutl;
+  coutl.open("../OUTPUT/loss_gen"+to_string(rank)+".dat",ios::app);
+  coutl << _chromo(0).get_loss() << endl;
+  coutl.close();
+
+  //mean loss
+  double sum=0, mean;
+  int half=_population/2;
+
+  for(int k=0; k< half; k++){
+
+      sum += _chromo(k).get_loss();
+  }
+  ofstream coutm;
+  coutm.open("../OUTPUT/mean_loss"+to_string(rank)+".dat",ios::app);
+  coutm << sum/double(half) << endl;
+  coutm.close();
+  
+  //path 
+  //stampo il path solo se sono all'ultima generazione
+  if(i==_ngen-1){
+    
+    ofstream coutpath;
+    coutpath.open("../OUTPUT/path"+to_string(rank)+".dat",ios::app);
+    int riga;
+    for(int k=0; k<_n_city; k++){
+      coutpath<<_best_chromo.get_gene(k)<<"\t";
+    }
+    coutpath<<endl;
+    coutpath<< "loss :"<<_best_chromo.get_loss();
+    coutpath<<endl;
+    for(int k=0; k<_n_city; k++){
+
+      coutpath<<_best_chromo.get_gene(k)<<"\t";
+
+        for(int j=0; j<2; j++ ){
+        riga= _best_chromo.get_gene(k)-1;
+        coutpath<< city(riga,j)<<"\t";
+        }
+
+      coutpath<< endl;
+    }
+  coutpath<< 1 <<"\t"<<city(0,0)<<"\t"<<city(0,1)<<endl; //ristampo la prima città così quando plotto mi chiude il path
+  coutpath.close();
+  }
+  if(i==_ngen-1){_best_chromo.print(0);}
+  
+  
+  
+  return;
+}
+
+void System :: read_city(){
+
+      city.set_size(_n_city,2); //inizializzo matrice città
+      ifstream province;
+      province.open("../INPUT/cap_prov_ita.dat");
+      if(province.is_open()){
+
+          for(int i=0; i<_n_city; i++){
+            province >> city(i,0) >> city (i,1);
+          }
+        } else cerr <<"PROBLEM: Unable to open INPUT file cap_prov_ita.dat"<< endl;
+      province.close();
+
+return;
+}
+
+void System::exchange_best_chromosomes(int rank, int size) {
+    int n = _n_city;
+    
+    /*
+    cout << "Rank " << rank << " sta per inviare: ";
+      for (int i = 0; i < n; ++i)
+          cout << _chromo(0).get_gene(i) << " ";
+      cout << endl;
+    */
+
+    // 1. Prepara buffer del miglior cromosoma locale
+    vector<int> local_genes(n);
+    
+    for (int i = 0; i < n; ++i){
+
+        local_genes[i]= _chromo(0).get_gene(i);
+       
+      }
+    
+    vector<int> all_genes(n * size);//preparo vettore continuo con tutti i geni dei vettori scambiati
+    
+    // 2. Ogni processo invia il proprio best a tutti
+    //ogni processo invia n genes da (contenuti in) local_genes a tutti gli altri processi
+    //ogni processo riceve un array globale all_genes che contiene i dati di tutti i processi, in ordine di rank crescente.
+    MPI_Allgather(local_genes.data(), n, MPI_INT, //memptr è un metodo che restutuisce il puntatore alla memoria continua del ivec
+                  all_genes.data(), n, MPI_INT,
+                  MPI_COMM_WORLD);
+    /*
+    cout << "Rank " << rank << " all_genes : ";
+    for (int i = 0; i < n*size; ++i)
+        cout << all_genes[i] << " ";
+    cout << endl;
+  
+
+    for(int i=0; i<size; i++){
+
+    cout << "Cromosoma ricevuto da rank " << i << ": ";
+      for (int k = 0; k < n; ++k)
+          cout << all_genes[i * n + k] << " ";
+      cout << endl;
+    }
+    */
+    // 3. Crea i cromosomi ricevuti (escluso il proprio)
+    field<Chromosome> imported_chromos(size - 1);
+    int j = 0;
+    for (int i = 0; i < size; ++i) {
+        if (i == rank) continue;  // Salta il processo corrente (cioè non reinseriamo il nostro stesso cromosoma)
+
+        Chromosome imported;
+        imported.initialize(n);
+        for (int k = 0; k < n; ++k){
+            imported.set_gene(k, all_genes[i * n + k]);}
+            //imported.print(j);
+            imported.check();
+            imported.set_loss(distance2);
+            
+
+        imported_chromos(j) = imported;
+        ++j;
+    }
+
+    // 4. Ordina i cromosomi importati per loss crescente
+    sort_chromo_field(imported_chromos);
+
+    // 5. Sostituisci i peggiori cromosomi locali con i migliori ricevuti
+    
+    for (int i = 0; i < imported_chromos.size(); ++i) {
+        _chromo(_population - 1 - i) = imported_chromos(i);
+    }
+
+    // 6. Riordina la popolazione locale
+    sort_population();
+}
+
+
+
+/*
+void System :: finalize(){
+  this->write_configuration();
+  _rnd.SaveSeed();
+  ofstream coutf;
+  coutf.open("../OUTPUT/output.dat",ios::app);
+  coutf << "Simulation completed!" << endl;
+  coutf.close();
+  return;
+}
+*/
+
+int System :: get_ncity(){
+  return _n_city;
+}
+
+int System :: get_population(){
+  return _population;
+}
+
+mat System :: get_distance2(){
+
+  return distance2;
+}
+
+int System :: get_ngen(){
+
+    return _ngen;
+}
+
+void System :: print_terminal(){
+
+  for(int i=0; i< _population ; i++){
+
+      _chromo(i).print(i);
+
+  }
+  return;
+}
+
+/****************************************************************
+*****************************************************************
+    _/    _/  _/_/_/  _/       Numerical Simulation Laboratory
+   _/_/  _/ _/       _/       Physics Department
+  _/  _/_/    _/    _/       Universita' degli Studi di Milano
+ _/    _/       _/ _/       Prof. D.E. Galli
+_/    _/  _/_/_/  _/_/_/_/ email: Davide.Galli@unimi.it
+*****************************************************************
+*****************************************************************/
